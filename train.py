@@ -40,6 +40,20 @@ def train():
         os.makedirs(config.MODEL_SAVE_DIR)
         
     device = torch.device(config.DEVICE)
+    print("Runtime config:")
+    print(f"  Device: {config.DEVICE}")
+    print(f"  Batch size: {config.BATCH_SIZE}")
+    print(f"  Epochs: {config.EPOCHS}")
+    print(f"  Num workers: {config.NUM_WORKERS}")
+    print(f"  Max frames: {config.MAX_FRAMES}")
+    print(f"  Max audio sec: {config.MAX_AUDIO_LEN // config.SAMPLE_RATE}")
+    print(f"  Audio model: {config.AUDIO_MODEL_NAME}")
+    print(f"  Video model: {config.VIDEO_MODEL_NAME}")
+    print(f"  Projection dim: {config.PROJECTION_DIM}")
+    print(f"  Latent dim: {config.LATENT_DIM}")
+    print(f"  Num latents: {config.NUM_LATENTS}")
+    print(f"  AMP enabled: {config.USE_AMP}")
+    print(f"  Grad accum steps: {config.GRAD_ACCUM_STEPS}")
     
     # --- Dataset and DataLoader ---
     train_dataset = AudioVisualDataset(

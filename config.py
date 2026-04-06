@@ -9,11 +9,11 @@ load_dotenv()
 HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN", "")
 
 # ---  Model Configuration ---
-VIDEO_MODEL_NAME = "microsoft/swin-base-patch4-window7-224-in22k"
-AUDIO_MODEL_NAME = "facebook/hubert-large-ls960-ft"
-PROJECTION_DIM = 1024
-LATENT_DIM = 1024
-NUM_LATENTS = 128
+VIDEO_MODEL_NAME = os.getenv("VIDEO_MODEL_NAME", "microsoft/swin-base-patch4-window7-224-in22k")
+AUDIO_MODEL_NAME = os.getenv("AUDIO_MODEL_NAME", "facebook/hubert-large-ls960-ft")
+PROJECTION_DIM = int(os.getenv("PROJECTION_DIM", 1024))
+LATENT_DIM = int(os.getenv("LATENT_DIM", 1024))
+NUM_LATENTS = int(os.getenv("NUM_LATENTS", 128))
 NUM_CLASSES = 6  # Example: angry, happy, sad, neutral, fear, disgust
 
 # --- Dataset Configuration ---

@@ -95,8 +95,9 @@ class AudioVisualFusionModel(nn.Module):
                 f"Got shape: {tuple(video.shape)}"
             )
 
-        audio_features = self.audio_encoder(audio)
-        video_features = self.video_encoder(video)
+        with torch.no_grad():
+            audio_features = self.audio_encoder(audio)
+            video_features = self.video_encoder(video)
         
         # --- Concatenate Features ---
         # Concatenate along the sequence dimension
