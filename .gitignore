@@ -1,0 +1,14 @@
+.venv/
+data/
+logs/
+trained_models/
+__pycache__/
+*.pyc
+.env
+.ipynb_checkpoints/
+.DS_Store
+
+# large local artifacts
+artifacts/
+*.zip
+*.pth

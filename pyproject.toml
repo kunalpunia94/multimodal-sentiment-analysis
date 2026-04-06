@@ -1,0 +1,33 @@
+[project]
+name = "audio-visual-emotion-recognition"
+version = "0.1.0"
+description = "Robust Audio-Visual Emotion Recognition using Perceiver IO Fusion"
+authors = [{ name = "Gemini", email = "gemini@example.com" }]
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "transformers",
+    "datasets",
+    "einops",
+    "opencv-python",
+    "numpy",
+    "soundfile",
+    "pandas",
+    "scikit-learn",
+    "tqdm",
+    "matplotlib",
+    "seaborn",
+    "python-dotenv",
+    "ipykernel",
+    "ipython",
+    "tensorflow",
+    "mtcnn",
+    "torchcodec",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black"]
+
+[tool.setuptools]
