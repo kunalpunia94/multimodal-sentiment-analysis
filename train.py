@@ -51,7 +51,9 @@ def train():
         train_dataset,
         batch_size=config.BATCH_SIZE,
         shuffle=True,
-        num_workers=4
+        num_workers=config.NUM_WORKERS,
+        pin_memory=(config.DEVICE == "cuda"),
+        persistent_workers=(config.NUM_WORKERS > 0),
     )
     
     # --- Model, Optimizer, and Loss ---
@@ -60,6 +62,7 @@ def train():
     trainable_params = list(model.trainable_parameters())
     optimizer = AdamW(trainable_params, lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
     criterion = nn.BCEWithLogitsLoss()
+    scaler = torch.cuda.amp.GradScaler(enabled=(config.DEVICE == "cuda" and config.USE_AMP))
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_param_count = sum(p.numel() for p in trainable_params)
@@ -74,24 +77,35 @@ def train():
         running_loss = 0.0
         
         progress_bar = tqdm.tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.EPOCHS}")
+        optimizer.zero_grad(set_to_none=True)
         
-        for batch in progress_bar:
+        for step, batch in enumerate(progress_bar):
             audio = batch['audio'].to(device)
             video = batch['video'].to(device)
             labels = batch['label'].to(device)
-            
-            optimizer.zero_grad()
-            
+
             # Forward pass
-            logits = model(audio, video)
-            loss = criterion(logits, labels)
-            
+            with torch.cuda.amp.autocast(enabled=(config.DEVICE == "cuda" and config.USE_AMP)):
+                logits = model(audio, video)
+                loss = criterion(logits, labels)
+
             # Backward pass and optimization
-            loss.backward()
-            optimizer.step()
-            
+            scaled_loss = loss / max(config.GRAD_ACCUM_STEPS, 1)
+            scaler.scale(scaled_loss).backward()
+
+            if (step + 1) % max(config.GRAD_ACCUM_STEPS, 1) == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+
             running_loss += loss.item()
             progress_bar.set_postfix(loss=loss.item())
+
+        # Handle last partial accumulation window
+        if len(train_loader) % max(config.GRAD_ACCUM_STEPS, 1) != 0:
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
             
         epoch_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch+1}/{config.EPOCHS}, Loss: {epoch_loss:.4f}")

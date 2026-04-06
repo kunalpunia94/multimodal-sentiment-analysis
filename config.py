@@ -6,7 +6,7 @@ import os
 load_dotenv()
 
 # --- HuggingFace Configuration ---
-HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN")
+HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN", "")
 
 # ---  Model Configuration ---
 VIDEO_MODEL_NAME = "microsoft/swin-base-patch4-window7-224-in22k"
@@ -24,8 +24,8 @@ MSP_IMPROV_PATH = "data/MSP-IMPROV"
 # Preprocessing
 SAMPLE_RATE = 16000
 IMAGE_SIZE = 224
-MAX_FRAMES = 100  # Max frames to use from a video
-MAX_AUDIO_LEN = SAMPLE_RATE * 5  # 5 seconds
+MAX_FRAMES = int(os.getenv("MAX_FRAMES", 8))  # Max frames to use from a video
+MAX_AUDIO_LEN = SAMPLE_RATE * int(os.getenv("MAX_AUDIO_SEC", 3))  # seconds
 
 # Emotion labels for CREMA-D (example)
 CREMA_D_LABELS = {
@@ -47,11 +47,20 @@ EMOTION_MAP = {
 }
 
 # --- Training Configuration ---
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 16
-EPOCHS = 50
-LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 1e-5
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
+
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", 1))
+EPOCHS = int(os.getenv("EPOCHS", 10))
+LEARNING_RATE = float(os.getenv("LEARNING_RATE", 1e-4))
+WEIGHT_DECAY = float(os.getenv("WEIGHT_DECAY", 1e-5))
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", 2))
+USE_AMP = os.getenv("USE_AMP", "1") == "1"
+GRAD_ACCUM_STEPS = int(os.getenv("GRAD_ACCUM_STEPS", 1))
 
 # Modality Dropout
 MODALITY_DROPOUT_RATE = 0.2  # 20% for each modality
