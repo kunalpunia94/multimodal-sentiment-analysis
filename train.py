@@ -54,6 +54,8 @@ def train():
     print(f"  Num latents: {config.NUM_LATENTS}")
     print(f"  AMP enabled: {config.USE_AMP}")
     print(f"  Grad accum steps: {config.GRAD_ACCUM_STEPS}")
+    print(f"  Early stopping patience: {config.EARLY_STOPPING_PATIENCE}")
+    print(f"  Early stopping min delta: {config.EARLY_STOPPING_MIN_DELTA}")
     
     # --- Dataset and DataLoader ---
     train_dataset = AudioVisualDataset(
@@ -76,7 +78,7 @@ def train():
     trainable_params = list(model.trainable_parameters())
     optimizer = AdamW(trainable_params, lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
     criterion = nn.BCEWithLogitsLoss()
-    scaler = torch.cuda.amp.GradScaler(enabled=(config.DEVICE == "cuda" and config.USE_AMP))
+    scaler = torch.amp.GradScaler("cuda", enabled=(config.DEVICE == "cuda" and config.USE_AMP))
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_param_count = sum(p.numel() for p in trainable_params)
@@ -85,6 +87,7 @@ def train():
     
     # --- Training Loop ---
     best_loss = float('inf')
+    patience_counter = 0
     
     for epoch in range(config.EPOCHS):
         model.train()
@@ -99,7 +102,7 @@ def train():
             labels = batch['label'].to(device)
 
             # Forward pass
-            with torch.cuda.amp.autocast(enabled=(config.DEVICE == "cuda" and config.USE_AMP)):
+            with torch.amp.autocast("cuda", enabled=(config.DEVICE == "cuda" and config.USE_AMP)):
                 logits = model(audio, video)
                 loss = criterion(logits, labels)
 
@@ -125,10 +128,21 @@ def train():
         print(f"Epoch {epoch+1}/{config.EPOCHS}, Loss: {epoch_loss:.4f}")
         
         # --- Save Best Model ---
-        if epoch_loss < best_loss:
+        if epoch_loss < (best_loss - config.EARLY_STOPPING_MIN_DELTA):
             best_loss = epoch_loss
+            patience_counter = 0
             torch.save(model.state_dict(), os.path.join(config.MODEL_SAVE_DIR, 'best_model.pth'))
             print("Saved best model.")
+        else:
+            patience_counter += 1
+            print(
+                f"No significant improvement in training loss. "
+                f"Patience: {patience_counter}/{config.EARLY_STOPPING_PATIENCE}"
+            )
+
+        if patience_counter >= config.EARLY_STOPPING_PATIENCE:
+            print("Early stopping triggered.")
+            break
             
     print("Training finished.")
 

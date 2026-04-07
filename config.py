@@ -61,6 +61,8 @@ WEIGHT_DECAY = float(os.getenv("WEIGHT_DECAY", 1e-5))
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", 2))
 USE_AMP = os.getenv("USE_AMP", "1") == "1"
 GRAD_ACCUM_STEPS = int(os.getenv("GRAD_ACCUM_STEPS", 1))
+EARLY_STOPPING_PATIENCE = int(os.getenv("EARLY_STOPPING_PATIENCE", 3))
+EARLY_STOPPING_MIN_DELTA = float(os.getenv("EARLY_STOPPING_MIN_DELTA", 1e-4))
 
 # Modality Dropout
 MODALITY_DROPOUT_RATE = 0.2  # 20% for each modality
