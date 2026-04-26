@@ -35,6 +35,7 @@ from sklearn.metrics import (
     roc_curve,
     auc,
     roc_auc_score,
+    brier_score_loss,
 )
 
 # Ensure project root imports work even when script is run from outside project directory.
@@ -344,7 +345,8 @@ def evaluate_mode(mode: str = "combined") -> Tuple[np.ndarray, np.ndarray, np.nd
                 audio = torch.zeros_like(audio)
 
             logits = model(audio, video)
-            probs = torch.sigmoid(logits)
+            # Use softmax (not sigmoid) — this is a multi-class problem
+            probs = torch.softmax(logits, dim=1)
 
             all_probs.append(probs.cpu().numpy())
             all_labels.append(labels.cpu().numpy())
@@ -352,7 +354,12 @@ def evaluate_mode(mode: str = "combined") -> Tuple[np.ndarray, np.ndarray, np.nd
     probs_np = np.concatenate(all_probs, axis=0)
     labels_np = np.concatenate(all_labels, axis=0)
 
-    y_true_idx = labels_np.argmax(axis=1)
+    # labels_np may be 1-D class indices or 2-D one-hot — handle both
+    if labels_np.ndim == 2:
+        y_true_idx = labels_np.argmax(axis=1)
+    else:
+        y_true_idx = labels_np.astype(int)   # already class indices
+
     y_pred_idx = probs_np.argmax(axis=1)
     return y_true_idx, y_pred_idx, probs_np
 
@@ -363,14 +370,29 @@ accuracy = accuracy_score(y_true, y_pred)
 precision = precision_score(y_true, y_pred, average="macro", zero_division=0)
 recall = recall_score(y_true, y_pred, average="macro", zero_division=0)
 f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+# Paper Table 2 columns ─────────────────────────────────────────────────────
+micro_f1 = f1_score(y_true, y_pred, average="micro", zero_division=0)
+sample_precision = precision_score(y_true, y_pred, average="weighted", zero_division=0)
+# Brier score
+y_true_int = np.array(y_true, dtype=int)
+y_prob_brier_onehot = np.eye(config.NUM_CLASSES)[y_true_int]
+brier_scores = [
+    brier_score_loss(y_prob_brier_onehot[:, i], y_prob[:, i])
+    for i in range(config.NUM_CLASSES)
+]
+avg_brier_score = float(np.mean(brier_scores))
+# ────────────────────────────────────────────────────────────────────────────
 
 idx_to_emotion = {v: k for k, v in config.EMOTION_MAP.items()}
 class_names = [idx_to_emotion[i] for i in range(config.NUM_CLASSES)]
 
-print("Accuracy:", round(float(accuracy), 4))
-print("Precision (macro):", round(float(precision), 4))
-print("Recall (macro):", round(float(recall), 4))
-print("F1-score (macro):", round(float(f1), 4))
+print("\n========= Evaluation Metrics (paper Table 2 aligned) =========")
+print(f"{'Accuracy':<25}: {accuracy:.4f}")
+print(f"{'Macro-F1':<25}: {f1:.4f}")
+print(f"{'Micro-F1':<25}: {micro_f1:.4f}")
+print(f"{'Sample-Precision (wt.)':<25}: {sample_precision:.4f}")
+print(f"{'Average Brier Score':<25}: {avg_brier_score:.4f}")
+print("=" * 55)
 print("\nClassification Report:")
 print(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
 
@@ -379,7 +401,10 @@ metrics_df = pd.DataFrame(
         {"metric": "accuracy", "value": float(accuracy)},
         {"metric": "precision_macro", "value": float(precision)},
         {"metric": "recall_macro", "value": float(recall)},
-        {"metric": "f1_macro", "value": float(f1)},
+        {"metric": "f1_macro",  "value": float(f1)},
+        {"metric": "f1_micro",  "value": float(micro_f1)},
+        {"metric": "sample_precision_weighted", "value": float(sample_precision)},
+        {"metric": "avg_brier_score", "value": avg_brier_score},
     ]
 )
 metrics_df.to_csv(TABLE_DIR / "overall_metrics.csv", index=False)
@@ -528,11 +553,120 @@ print("Saved sample predictions:", PRED_DIR / "sample_predictions.csv")
 
 
 # %% [markdown]
+# ## Comparison with Paper Table 2 (CREMA-D)
+# - Computes bootstrap confidence intervals (2.75% – 97.5%) to match the paper.
+# - Compares against all CREMA-D baselines: TLSTM, SFAV, MulT, AuxFormer, VAVL, RAVER.
+
+# %%
+# ── Bootstrap CI helper (mirrors evaluate.py) ─────────────────────────────
+def _bootstrap_ci(y_t, y_p, metric_fn, n_boot=1000, seed=42):
+    rng = np.random.default_rng(seed)
+    n   = len(y_t)
+    scores = [metric_fn(y_t[rng.integers(0, n, n)], y_p[rng.integers(0, n, n)])
+              for _ in range(n_boot)]
+    return float(np.percentile(scores, 2.75)), float(np.percentile(scores, 97.5))
+
+# Point estimates already computed above as y_true / y_pred / y_prob
+y_t = np.array(y_true, dtype=int)
+y_p = np.array(y_pred, dtype=int)
+
+print("Computing bootstrap CIs for your model …", flush=True)
+our_macro_f1   = f1_score(y_t, y_p, average="macro",    zero_division=0)
+our_micro_f1   = f1_score(y_t, y_p, average="micro",    zero_division=0)
+our_sample_prec = precision_score(y_t, y_p, average="weighted", zero_division=0)
+
+macro_lo,  macro_hi  = _bootstrap_ci(y_t, y_p, lambda a,b: f1_score(a, b, average="macro",    zero_division=0))
+micro_lo,  micro_hi  = _bootstrap_ci(y_t, y_p, lambda a,b: f1_score(a, b, average="micro",    zero_division=0))
+sprec_lo,  sprec_hi  = _bootstrap_ci(y_t, y_p, lambda a,b: precision_score(a, b, average="weighted", zero_division=0))
+
+def _cell(val, lo, hi):
+    return f"{val:.3f} ({lo:.3f}, {hi:.3f})"
+
+# ── Hardcoded paper Table 2 baselines (CREMA-D) ───────────────────────────
+paper_baselines = [
+    # (model,       macro_f1, macro_lo, macro_hi,  micro_f1, micro_lo, micro_hi,  sprec,  sprec_lo, sprec_hi)
+    ("TLSTM",       0.710, 0.704, 0.716,   0.705, 0.699, 0.711,   0.705, 0.699, 0.711),
+    ("SFAV",        0.731, 0.725, 0.737,   0.731, 0.725, 0.736,   0.728, 0.723, 0.734),
+    ("MulT",        0.743, 0.738, 0.750,   0.743, 0.738, 0.749,   0.741, 0.736, 0.748),
+    ("AuxFormer",   0.742, 0.737, 0.748,   0.742, 0.737, 0.748,   0.741, 0.734, 0.747),
+    ("VAVL",        0.772, 0.767, 0.778,   0.770, 0.765, 0.775,   0.770, 0.765, 0.775),
+    ("RAVER",       0.777, 0.771, 0.782,   0.772, 0.766, 0.777,   0.772, 0.766, 0.777),
+]
+
+# ── Build comparison DataFrame ────────────────────────────────────────────
+comp_rows = []
+for row in paper_baselines:
+    m, mf1, mlo, mhi, mif, milo, mihi, sp, splo, sphi = row
+    comp_rows.append({
+        "Model":           m,
+        "Macro-F1":        _cell(mf1, mlo, mhi),
+        "Micro-F1":        _cell(mif, milo, mihi),
+        "Sample-Precision": _cell(sp,  splo, sphi),
+        "_macro":          mf1,   # for bar chart
+        "_micro":          mif,
+        "_sprec":          sp,
+    })
+
+# Add your model (last row, bold indicator via model name)
+comp_rows.append({
+    "Model":           "Ours",
+    "Macro-F1":        _cell(our_macro_f1,    macro_lo,  macro_hi),
+    "Micro-F1":        _cell(our_micro_f1,    micro_lo,  micro_hi),
+    "Sample-Precision": _cell(our_sample_prec, sprec_lo,  sprec_hi),
+    "_macro":          our_macro_f1,
+    "_micro":          our_micro_f1,
+    "_sprec":          our_sample_prec,
+})
+
+comp_df = pd.DataFrame(comp_rows)
+
+# ── Print table ───────────────────────────────────────────────────────────
+display_df = comp_df[["Model", "Macro-F1", "Micro-F1", "Sample-Precision"]]
+print("\n" + "="*75)
+print(" Table 2 Comparison — CREMA-D  (CI: 2.75% – 97.5%)")
+print("="*75)
+print(display_df.to_string(index=False))
+print("="*75)
+
+display_df.to_csv(TABLE_DIR / "table2_comparison.csv", index=False)
+print("Saved comparison table:", TABLE_DIR / "table2_comparison.csv")
+
+# ── Bar chart ─────────────────────────────────────────────────────────────
+models   = comp_df["Model"].tolist()
+x        = np.arange(len(models))
+width    = 0.28
+colors   = ["#4C72B0", "#DD8452", "#55A868"]
+
+fig, ax = plt.subplots(figsize=(12, 5))
+b1 = ax.bar(x - width, comp_df["_macro"],  width, label="Macro-F1",        color=colors[0], alpha=0.85)
+b2 = ax.bar(x,          comp_df["_micro"],  width, label="Micro-F1",        color=colors[1], alpha=0.85)
+b3 = ax.bar(x + width,  comp_df["_sprec"],  width, label="Sample-Precision", color=colors[2], alpha=0.85)
+
+# Highlight "Ours" bar group
+for bar_group in [b1, b2, b3]:
+    bar_group[-1].set_edgecolor("red")
+    bar_group[-1].set_linewidth(2.0)
+
+ax.set_xticks(x)
+ax.set_xticklabels(models, fontsize=11)
+ax.set_ylim(0.60, 0.85)
+ax.set_ylabel("Score", fontsize=12)
+ax.set_title("CREMA-D — Model Comparison (Table 2 replication)", fontsize=13)
+ax.legend(fontsize=10)
+ax.axhline(0.777, color="gray", linestyle="--", linewidth=0.8, label="RAVER Macro-F1")
+plt.tight_layout()
+plt.savefig(FIG_DIR / "table2_comparison.png", dpi=160)
+plt.show()
+print("Saved comparison chart:", FIG_DIR / "table2_comparison.png")
+
+
+# %% [markdown]
 # ## Final Conclusion
 #
 # ### Overall model performance
 # - The script reports full evaluation metrics (accuracy, precision, recall, F1, ROC/AUC).
 # - It visualizes confusion matrix and modality-wise performance.
+# - **Comparison with paper baselines** (Table 2) is saved to `table2_comparison.csv` and `table2_comparison.png`.
 #
 # ### Best modality
 # - Use `modality_performance.csv` and modality bar chart to identify the strongest setup.

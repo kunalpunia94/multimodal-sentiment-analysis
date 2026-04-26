@@ -117,6 +117,13 @@ def extract_frames_from_video(video_path):
 
     frames = np.array(frames)
     
+    frames = frames.astype(np.float32) / 255.0
+
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+
+    frames = (frames - mean) / std
+
     # Pad or truncate frames to a fixed length
     num_frames = frames.shape[0]
     if num_frames < config.MAX_FRAMES:
@@ -202,7 +209,6 @@ def extract_audio_from_path(audio_path):
     else:
         padding = torch.zeros((1, config.MAX_AUDIO_LEN - waveform.shape[1]))
         waveform = torch.cat([waveform, padding], dim=1)
-        
     return waveform
 
 def get_label_from_filename(filename):
@@ -216,18 +222,9 @@ def get_label_from_filename(filename):
         return parts[2]
     return None
 
-def convert_label_to_multi_label(label):
-    """Convert emotion code into model target tensor.
-
-    Args:
-        label (str | None): short code, e.g. 'ANG', 'HAP', ...
-
-    Returns:
-        torch.Tensor: multi-hot vector with shape (config.NUM_CLASSES,).
-    """
-    target = torch.zeros(config.NUM_CLASSES)
+def convert_label_to_index(label):
     if label in config.CREMA_D_LABELS:
         emotion = config.CREMA_D_LABELS[label]
         if emotion in config.EMOTION_MAP:
-            target[config.EMOTION_MAP[emotion]] = 1.0
-    return target
+            return config.EMOTION_MAP[emotion]
+    return -1

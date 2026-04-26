@@ -13,6 +13,7 @@ What this script does:
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data import random_split
 from torch.optim import AdamW
 import tqdm
 import os
@@ -57,19 +58,38 @@ def train():
     print(f"  Early stopping patience: {config.EARLY_STOPPING_PATIENCE}")
     print(f"  Early stopping min delta: {config.EARLY_STOPPING_MIN_DELTA}")
     
-    # --- Dataset and DataLoader ---
-    train_dataset = AudioVisualDataset(
+    # Full dataset
+    dataset = AudioVisualDataset(
         data_path=config.CREMA_D_PATH,
         modality_dropout_rate=config.MODALITY_DROPOUT_RATE,
     )
-    
+
+    # Split into train and validation
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+
+    generator = torch.Generator().manual_seed(42)
+
+    train_dataset, val_dataset = random_split(
+        dataset,
+        [train_size, val_size],
+        generator=generator
+    )
+
+    # DataLoaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
         pin_memory=(config.DEVICE == "cuda"),
-        persistent_workers=(config.NUM_WORKERS > 0),
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.EVAL_BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
     )
     
     # --- Model, Optimizer, and Loss ---
@@ -77,7 +97,10 @@ def train():
     # Important: only train fusion/head parameters for efficiency and stability.
     trainable_params = list(model.trainable_parameters())
     optimizer = AdamW(trainable_params, lr=config.LEARNING_RATE, weight_decay=config.WEIGHT_DECAY)
-    criterion = nn.BCEWithLogitsLoss()
+
+    class_weights = torch.tensor([1.0, 1.2, 1.1, 1.0, 1.3, 1.2]).to(device)
+
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
     scaler = torch.amp.GradScaler("cuda", enabled=(config.DEVICE == "cuda" and config.USE_AMP))
 
     total_params = sum(p.numel() for p in model.parameters())

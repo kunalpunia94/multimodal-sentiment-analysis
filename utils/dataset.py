@@ -95,7 +95,8 @@ class AudioVisualDataset(Dataset):
         # --- Label ---
         filename = os.path.basename(audio_path)
         label_str = preprocessing.get_label_from_filename(filename)
-        label = preprocessing.convert_label_to_multi_label(label_str)
+        label = preprocessing.convert_label_to_index(label_str)
+        label = torch.tensor(label, dtype=torch.long)
         
         # --- Modality Dropout ---
         # Applied per sample, per modality.

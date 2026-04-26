@@ -54,10 +54,24 @@ class AudioVisualFusionModel(nn.Module):
         This keeps training focused on fusion/classification layers, reducing
         memory and compute requirements.
         """
+        # Freeze everything
         for p in self.audio_encoder.parameters():
             p.requires_grad = False
+
         for p in self.video_encoder.parameters():
             p.requires_grad = False
+
+        # 🔥 Unfreeze LAST layers safely (NO ASSUMPTIONS)
+
+        # Audio (last 2 layers only)
+        for name, param in self.audio_encoder.named_parameters():
+            if "layers.10" in name or "layers.11" in name:
+                param.requires_grad = True
+
+        # Video (last stage)
+        for name, param in self.video_encoder.named_parameters():
+            if "layers.3" in name:
+                param.requires_grad = True
 
     def trainable_parameters(self):
         """Return only parameters that should be optimized.
@@ -95,9 +109,21 @@ class AudioVisualFusionModel(nn.Module):
                 f"Got shape: {tuple(video.shape)}"
             )
 
-        with torch.no_grad():
+        if not self.training:
+            with torch.no_grad():
+                audio_features = self.audio_encoder(audio)
+                video_features = self.video_encoder(video)
+        else:
             audio_features = self.audio_encoder(audio)
             video_features = self.video_encoder(video)
+
+        # ✅ pooling (OUTSIDE no_grad so it always runs)
+        audio_features = audio_features.mean(dim=1)
+        video_features = video_features.mean(dim=1)
+
+        # Add sequence dim back
+        audio_features = audio_features.unsqueeze(1)
+        video_features = video_features.unsqueeze(1)
         
         # --- Concatenate Features ---
         # Concatenate along the sequence dimension
